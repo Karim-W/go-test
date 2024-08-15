@@ -91,3 +91,61 @@ func InitDockerPostgresSQLDBTest(t *testing.T) (sqldb.DB, CleanupFunc) {
 
 	return sqldb.DBWarpper(db, nil, "test", zap.NewExample()), cleanup
 }
+
+func GetConnectionString() (dsn string, cleanup CleanupFunc, err error) {
+	pool, err := dockertest.NewPool("")
+	if err != nil {
+		log.Printf("Could not construct pool: %s\n", err)
+		return
+	}
+
+	err = pool.Client.Ping()
+	if err != nil {
+		log.Printf("Could not connect to Docker: %s\n", err)
+		return
+	}
+
+	// pulls an image, creates a container based on it and runs it
+	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
+		Repository: "postgres",
+		Tag:        "16",
+		Env: []string{
+			"POSTGRES_PASSWORD=secret",
+			"POSTGRES_USER=postgres",
+			"POSTGRES_DB=test",
+			"listen_addresses = '*'",
+		},
+	}, func(config *docker.HostConfig) {
+		// set AutoRemove to true so that stopped container goes away by itself
+		config.AutoRemove = true
+		config.RestartPolicy = docker.RestartPolicy{Name: "no"}
+	})
+	if err != nil {
+		log.Printf("Could not start resource: %v\n", err)
+		return
+	}
+
+	hostAndPort := resource.GetHostPort("5432/tcp")
+	databaseUrl := fmt.Sprintf("postgres://postgres:secret@%s/test?sslmode=disable", hostAndPort)
+
+	log.Println("Connecting to database on url: ", databaseUrl)
+
+	pool.MaxWait = 120 * time.Second
+
+	cleanup = func() {
+		if err := pool.Purge(resource); err != nil {
+			log.Printf("Could not purge resource: %s\n", err)
+			return
+		}
+	}
+
+	return databaseUrl, cleanup, nil
+}
+
+func GetConnectionStringTest(t *testing.T) (dsn string, cleanup CleanupFunc) {
+	dsn, cleanup, err := GetConnectionString()
+	if err != nil {
+		t.Fatalf("Could not create postgres db: %s", err)
+	}
+	return dsn, cleanup
+}
