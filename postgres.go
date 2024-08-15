@@ -92,7 +92,7 @@ func InitDockerPostgresSQLDBTest(t *testing.T) (sqldb.DB, CleanupFunc) {
 	return sqldb.DBWarpper(db, nil, "test", zap.NewExample()), cleanup
 }
 
-func GetConnectionString() (dsn string, cleanup CleanupFunc, err error) {
+func PostgresConnectionString() (dsn string, cleanup CleanupFunc, err error) {
 	pool, err := dockertest.NewPool("")
 	if err != nil {
 		log.Printf("Could not construct pool: %s\n", err)
@@ -132,6 +132,17 @@ func GetConnectionString() (dsn string, cleanup CleanupFunc, err error) {
 
 	pool.MaxWait = 120 * time.Second
 
+	if err = pool.Retry(func() error {
+		db, err := sql.Open("postgres", databaseUrl)
+		if err != nil {
+			return err
+		}
+		return db.Ping()
+	}); err != nil {
+		log.Printf("Could not connect to docker: %s\n", err)
+		return
+	}
+
 	cleanup = func() {
 		if err := pool.Purge(resource); err != nil {
 			log.Printf("Could not purge resource: %s\n", err)
@@ -142,8 +153,8 @@ func GetConnectionString() (dsn string, cleanup CleanupFunc, err error) {
 	return databaseUrl, cleanup, nil
 }
 
-func GetConnectionStringTest(t *testing.T) (dsn string, cleanup CleanupFunc) {
-	dsn, cleanup, err := GetConnectionString()
+func PostgresConnectionStringTest(t *testing.T) (dsn string, cleanup CleanupFunc) {
+	dsn, cleanup, err := PostgresConnectionString()
 	if err != nil {
 		t.Fatalf("Could not create postgres db: %s", err)
 	}
